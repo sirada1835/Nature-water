@@ -248,7 +248,7 @@ const TABS = [['sell', '🧾 ขาย'], ['stock', '📦 สต็อก'], ['b
 function render() {
   if (!S.user) { $('#app').innerHTML = loginView(); return; }
   const v = {sell: viewSell, stock: viewStock, bills: viewBills, cust: viewCust}[S.tab]();
-  $('#app').innerHTML = `<header><b>💧 Nature ขายส่ง</b><span><small style="color:#9bb7e0">${S.profile ? (S.profile.role === 'owner' ? 'เจ้าของ' : 'พนักงาน') : ''}</small><button onclick="logout()">ออก</button></span></header>
+  $('#app').innerHTML = `<header><b>💧 Nature Water</b><span><small style="color:#9bb7e0">${S.profile ? (S.profile.role === 'owner' ? 'เจ้าของ' : 'พนักงาน') : ''}</small><button onclick="logout()">ออก</button></span></header>
 <main>${v}</main><nav>${TABS.map(t => `<button class="${S.tab === t[0] ? 'on' : ''}" onclick="S.tab='${t[0]}';render()">${t[1]}</button>`).join('')}</nav>`;
   if (S.tab === 'sell') sum();
 }
