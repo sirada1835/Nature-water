@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Nature ขายส่ง">
+<title>Nature ขายส่ง</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
+<style>
+:root{--navy:#0b2a5b;--blue:#1e88e5;--light:#e8f3fd;--line:#d5e3f3;--red:#c62828;--ink:#14213d}
+*{box-sizing:border-box}
+body{margin:0;font-family:-apple-system,"Sarabun","Noto Sans Thai",sans-serif;background:#f4f9ff;color:var(--ink);padding-bottom:84px}
+header{background:var(--navy);color:#fff;padding:calc(12px + env(safe-area-inset-top)) 16px 12px;display:flex;justify-content:space-between;align-items:center;position:sticky;top:0;z-index:5}
+header button{background:transparent;border:1px solid #9bb7e0;color:#fff;border-radius:8px;padding:4px 10px;margin-left:8px}
+main{max-width:720px;margin:0 auto;padding:12px}
+.card{background:#fff;border:1px solid var(--line);border-radius:14px;padding:14px;margin-bottom:12px}
+.card h3{margin:0 0 10px;color:var(--navy);font-size:17px}
+.card.void{opacity:.55}
+input,select{width:100%;font-size:16px;padding:11px;border:1px solid var(--line);border-radius:10px;margin-bottom:8px;background:#fff;color:var(--ink)}
+.row{display:flex;gap:8px}.row>*{flex:1}.row .x{flex:0 0 46px}
+.btn{width:100%;background:var(--blue);color:#fff;border:0;border-radius:12px;padding:14px;font-size:17px;font-weight:600}
+.btn.big{margin-bottom:12px;background:var(--navy)}.btn:disabled{opacity:.5}
+.ghost{background:var(--light);color:var(--navy);border:0;border-radius:10px;padding:10px;font-size:15px;width:100%}
+.ghost.red{color:var(--red)}
+.x{background:#fdecea;color:var(--red);border:0;border-radius:10px;margin-bottom:8px}
+.line{display:flex;justify-content:space-between;gap:8px;padding:6px 0}
+.low{color:var(--red)}.warn{color:var(--red);font-size:14px;margin-top:6px;white-space:pre-line}
+.total{font-size:22px;font-weight:700;color:var(--navy)}
+nav{position:fixed;bottom:0;left:0;right:0;background:#fff;border-top:1px solid var(--line);display:flex;padding-bottom:env(safe-area-inset-bottom)}
+nav button{flex:1;border:0;background:#fff;padding:12px 2px;font-size:14px;color:#6b7c93}
+nav button.on{color:var(--blue);font-weight:700;border-top:3px solid var(--blue)}
+.login{max-width:360px;margin:12vh auto;padding:20px;text-align:center}
+.login h1{color:var(--navy)}
+.toast{position:fixed;left:12px;right:12px;top:calc(12px + env(safe-area-inset-top));background:#1b5e20;color:#fff;padding:14px;border-radius:12px;z-index:99;white-space:pre-line}
+.toast.bad{background:var(--red)}
+small{color:#6b7c93}
+</style>
+</head>
+<body>
+<div id="app"></div>
+<script>
+// ===== ตั้งค่า: วางคีย์ anon/publishable จาก Supabase (Project Settings > API Keys) =====
+const SUPABASE_URL = 'https://pbnmkhcfbmcqvmgqouhq.supabase.co';
+const SUPABASE_KEY = 'วางคีย์ที่นี่';
+// ========================================================================================
+
+const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const baht = n => '฿' + Number(n || 0).toLocaleString('th-TH', {maximumFractionDigits: 2});
+const num = v => { const n = parseFloat(v); return isNaN(n) ? 0 : n; };
+const today = () => new Date(Date.now() + 7 * 3600e3).toISOString().slice(0, 10);
+const newF = () => ({customer:'', method:'cash', discount:'', fee:'', paid:'', note:''});
+const S = {user:null, profile:null, tab:'sell', products:[], tiers:[], customers:[], stock:[], sales:[], cust:[],
+           cart:[{product_id:'', qty:''}], f:newF(), key:crypto.randomUUID(), busy:false};
+
+function toast(m, bad) {
+  const e = document.createElement('div');
+  e.className = 'toast' + (bad ? ' bad' : ''); e.textContent = m;
+  document.body.appendChild(e); setTimeout(() => e.remove(), bad ? 7000 : 3500);
+}
+
+// ---------- เข้าสู่ระบบ ----------
+const loginView = () => `<div class="login"><h1>💧 Nature ขายส่ง</h1><p>เข้าสู่ระบบ</p>
+<input id="em" type="email" placeholder="อีเมล" autocomplete="username">
+<input id="pw" type="password" placeholder="รหัสผ่าน" autocomplete="current-password">
+<button class="btn" onclick="login()">เข้าสู่ระบบ</button></div>`;
+async function login() {
+  const {error} = await sb.auth.signInWithPassword({email: $('#em').value.trim(), password: $('#pw').value});
+  if (error) return toast('เข้าสู่ระบบไม่สำเร็จ: ' + error.message, 1);
+  await start();
+}
+async function logout() { await sb.auth.signOut(); S.user = null; render(); }
+
+// ---------- โหลดข้อมูล ----------
+async function loadAll() {
+  const r = await Promise.all([
+    sb.from('products').select('*').eq('active', true).order('size_ml', {ascending: false}),
+    sb.from('price_tiers').select('*'),
+    sb.from('customers').select('*').eq('active', true).order('name'),
+    sb.from('v_stock').select('*').order('size_ml', {ascending: false}),
+    sb.from('sales').select('*,customers(name)').order('created_at', {ascending: false}).limit(50),
+    sb.from('v_customer_summary').select('*').order('outstanding', {ascending: false}),
+    sb.from('profiles').select('*').eq('id', S.user.id).maybeSingle()
+  ]);
+  const err = r.find(x => x.error);
+  if (err) toast('โหลดข้อมูลไม่สำเร็จ: ' + err.error.message, 1);
+  [S.products, S.tiers, S.customers, S.stock, S.sales, S.cust] = r.slice(0, 6).map(x => x.data || []);
+  S.profile = r[6].data;
+}
+async function start() {
+  if (SUPABASE_KEY.startsWith('วาง')) { $('#app').innerHTML = '<div class="login"><h1>ยังไม่ได้ตั้งค่าคีย์</h1><p>แก้ไฟล์ index.html ใส่คีย์ที่บรรทัด SUPABASE_KEY</p></div>'; return; }
+  const {data} = await sb.auth.getSession();
+  S.user = data.session?.user || null;
+  if (S.user) await loadAll();
+  render();
+}
+
+// ---------- ราคา (ตัวอย่างฝั่งหน้าจอ ราคาจริงคิดที่ฐานข้อมูล) ----------
+function groups() {
+  const m = {};
+  S.cart.forEach(l => { const q = parseInt(l.qty); if (l.product_id && q > 0) m[l.product_id] = (m[l.product_id] || 0) + q; });
+  return m;
+}
+function unitPrice(pid, q) {
+  const t = S.tiers.find(t => t.product_id === pid && q >= t.min_qty && (t.max_qty == null || q <= t.max_qty));
+  return t ? Number(t.price_per_pack) : null;
+}
+function calc() {
+  const g = groups(); let sub = 0; const bad = [], rows = [];
+  for (const pid in g) {
+    const name = (S.products.find(p => p.id === pid) || {}).name, p = unitPrice(pid, g[pid]);
+    if (p == null) bad.push(name + ': ไม่มีราคาสำหรับ ' + g[pid] + ' แพ็ค');
+    else { sub += p * g[pid]; rows.push({name, q: g[pid], p}); }
+  }
+  return {g, sub, bad, rows};
+}
+
+// ---------- หน้าขาย ----------
+function viewSell() {
+  const f = S.f, popt = id => S.products.map(p => `<option value="${p.id}" ${p.id === id ? 'selected' : ''}>${esc(p.name)}</option>`).join('');
+  const lines = S.cart.map((l, i) => `<div class="row"><select onchange="setLine(${i},'product_id',this.value)"><option value="">เลือกสินค้า</option>${popt(l.product_id)}</select>
+<input type="number" inputmode="numeric" min="1" placeholder="แพ็ค" value="${esc(l.qty)}" oninput="setLine(${i},'qty',this.value)">
+${S.cart.length > 1 ? `<button class="x" onclick="delLine(${i})">✕</button>` : ''}</div>`).join('');
+  const copt = S.customers.map(c => `<option value="${c.id}" ${c.id === f.customer ? 'selected' : ''}>${esc(c.name)}${c.phone ? ' · ' + esc(c.phone) : ''}</option>`).join('');
+  const m = x => f.method === x ? 'selected' : '';
+  return `<div class="card"><h3>รายการสินค้า</h3>${lines}<button class="ghost" onclick="addLine()">＋ เพิ่มสินค้าอีกขนาด</button></div>
+<div class="card"><h3>ลูกค้า</h3><select onchange="S.f.customer=this.value;sum()"><option value="">ลูกค้าทั่วไป (ไม่ระบุ)</option>${copt}</select>
+<button class="ghost" onclick="addCustomer()">＋ เพิ่มลูกค้าใหม่</button></div>
+<div class="card"><h3>การชำระเงิน</h3>
+<select onchange="S.f.method=this.value;sum()"><option value="cash" ${m('cash')}>เงินสด</option><option value="transfer" ${m('transfer')}>โอนเงิน</option><option value="credit" ${m('credit')}>ขายเชื่อ</option></select>
+<div class="row"><input type="number" inputmode="decimal" placeholder="ส่วนลด ฿" value="${esc(f.discount)}" oninput="S.f.discount=this.value;sum()">
+<input type="number" inputmode="decimal" placeholder="ค่าจัดส่ง ฿" value="${esc(f.fee)}" oninput="S.f.fee=this.value;sum()"></div>
+<input type="number" inputmode="decimal" placeholder="ยอดที่รับแล้ว ฿ (เว้นว่าง = ตามวิธีชำระ)" value="${esc(f.paid)}" oninput="S.f.paid=this.value;sum()">
+<input placeholder="หมายเหตุ" value="${esc(f.note)}" oninput="S.f.note=this.value"></div>
+<div class="card" id="sum"></div>
+<button class="btn big" id="sbtn" onclick="submitSale()">บันทึกการขาย</button>`;
+}
+function setLine(i, k, v) { S.cart[i][k] = v; sum(); }
+function addLine() { S.cart.push({product_id:'', qty:''}); render(); }
+function delLine(i) { S.cart.splice(i, 1); render(); }
+function sum() {
+  const el = $('#sum'); if (!el) return;
+  const c = calc(), f = S.f, total = c.sub - num(f.discount) + num(f.fee);
+  const paid = f.paid === '' ? (f.method === 'credit' ? 0 : total) : num(f.paid);
+  const warn = [...c.bad];
+  for (const pid in c.g) { const st = S.stock.find(s => s.product_id === pid); if (st && c.g[pid] > st.on_hand) warn.push(st.name + ': สต็อกมี ' + st.on_hand + ' แพ็ค ไม่พอ'); }
+  if (paid > total) warn.push('ยอดที่รับมากกว่ายอดสุทธิ');
+  el.innerHTML = c.rows.map(r => `<div class="line"><span>${esc(r.name)}<br><small>${r.q} แพ็ค × ${baht(r.p)}</small></span><b>${baht(r.q * r.p)}</b></div>`).join('') +
+    `<div class="line"><span>ยอดสินค้า</span><span>${baht(c.sub)}</span></div>
+<div class="line total"><span>ยอดสุทธิ</span><span>${baht(total)}</span></div>
+<div class="line"><span>รับแล้ว ${baht(paid)}</span><span>ค้างชำระ ${baht(Math.max(total - paid, 0))}</span></div>` +
+    (warn.length ? `<div class="warn">⚠️ ${esc(warn.join('\n'))}</div>` : '');
+}
+async function addCustomer() {
+  const name = (prompt('ชื่อลูกค้า') || '').trim(); if (!name) return;
+  const phone = (prompt('เบอร์โทร (เว้นว่างได้)') || '').trim();
+  const address = (prompt('ที่อยู่จัดส่ง (เว้นว่างได้)') || '').trim();
+  const {data, error} = await sb.from('customers').insert({name, phone: phone || null, address: address || null}).select().single();
+  if (error) return toast('เพิ่มลูกค้าไม่สำเร็จ: ' + error.message, 1);
+  await loadAll(); S.f.customer = data.id; render();
+}
+async function submitSale() {
+  if (S.busy) return;
+  const c = calc(), f = S.f;
+  if (!Object.keys(c.g).length) return toast('กรุณาเลือกสินค้าและจำนวน', 1);
+  if (c.bad.length) return toast(c.bad.join('\n'), 1);
+  S.busy = true; $('#sbtn').disabled = true;
+  const items = Object.entries(c.g).map(([product_id, qty]) => ({product_id, qty}));
+  const {data, error} = await sb.rpc('create_sale', {
+    p_idempotency_key: S.key, p_customer_id: f.customer || null, p_payment_method: f.method,
+    p_discount: num(f.discount), p_delivery_fee: num(f.fee), p_paid_amount: f.paid === '' ? null : num(f.paid),
+    p_note: f.note || null, p_items: items
+  });
+  S.busy = false;
+  if (error) { toast(error.message, 1); const b = $('#sbtn'); if (b) b.disabled = false; return; }
+  const {data: sale} = await sb.from('sales').select('receipt_no,total').eq('id', data).maybeSingle();
+  S.cart = [{product_id:'', qty:''}]; S.f = newF(); S.key = crypto.randomUUID();
+  await loadAll(); render();
+  toast('บันทึกสำเร็จ ' + (sale ? sale.receipt_no + ' ยอด ' + baht(sale.total) : ''));
+}
+
+// ---------- สต็อก ----------
+function viewStock() {
+  const popt = S.products.map(p => `<option value="${p.id}">${esc(p.name)}</option>`).join('');
+  return `<div class="card"><h3>สต็อกคงเหลือ</h3>${S.stock.map(s => `<div class="line"><span>${esc(s.name)}</span><b class="${s.is_low ? 'low' : ''}">${s.on_hand} แพ็ค${s.is_low ? ' ⚠️ ใกล้หมด' : ''}</b></div>`).join('') || '<small>ยังไม่มีสินค้า</small>'}</div>
+<div class="card"><h3>รับน้ำเข้า</h3><select id="r_p">${popt}</select>
+<input id="r_q" type="number" inputmode="numeric" placeholder="จำนวนแพ็ค">
+<input id="r_c" type="number" inputmode="decimal" placeholder="ต้นทุนต่อแพ็ค ฿">
+<input id="r_d" type="date" value="${today()}"><input id="r_n" placeholder="หมายเหตุ">
+<button class="btn" onclick="receive()">บันทึกรับเข้า</button></div>
+<div class="card"><h3>เสียหาย / รับคืน / ปรับยอด</h3><select id="a_p">${popt}</select>
+<select id="a_t"><option value="damage">สินค้าเสียหาย (ตัดออก)</option><option value="return">รับคืนเข้าสต็อก</option><option value="adjust">ปรับยอด (บวกเพิ่ม / ลบลด)</option></select>
+<input id="a_q" type="number" placeholder="จำนวนแพ็ค"><input id="a_n" placeholder="เหตุผล (ต้องใส่เมื่อปรับยอด)">
+<button class="btn" onclick="adjust()">บันทึก</button></div>`;
+}
+async function receive() {
+  const {error} = await sb.rpc('receive_stock', {p_product: $('#r_p').value, p_qty: parseInt($('#r_q').value), p_unit_cost: parseFloat($('#r_c').value),
+    p_date: $('#r_d').value || null, p_note: $('#r_n').value || null});
+  if (error) return toast(error.message, 1);
+  await loadAll(); render(); toast('บันทึกรับน้ำเข้าสำเร็จ');
+}
+async function adjust() {
+  const {error} = await sb.rpc('adjust_stock', {p_product: $('#a_p').value, p_type: $('#a_t').value, p_qty: parseInt($('#a_q').value), p_note: $('#a_n').value || null});
+  if (error) return toast(error.message, 1);
+  await loadAll(); render(); toast('บันทึกสำเร็จ');
+}
+
+// ---------- บิล / ลูกหนี้ ----------
+function viewBills() {
+  return S.sales.map(s => {
+    const out = s.status === 'active' ? s.total - s.paid_amount : 0, owner = S.profile && S.profile.role === 'owner';
+    const status = s.status === 'voided' ? '🚫 ยกเลิกแล้ว' : out > 0 ? 'ค้าง ' + baht(out) : 'ชำระครบ ✓';
+    const acts = s.status === 'active'
+      ? `<div class="row">${out > 0 ? `<button class="ghost" onclick="pay('${s.id}',${out})">รับชำระ</button>` : ''}${owner ? `<button class="ghost red" onclick="voidSale('${s.id}','${esc(s.receipt_no)}')">ยกเลิกบิล</button>` : ''}</div>`
+      : `<small>เหตุผล: ${esc(s.void_reason)}</small>`;
+    return `<div class="card ${s.status === 'voided' ? 'void' : ''}"><div class="line"><b>${esc(s.receipt_no)}</b><span>${esc(s.sale_date)}</span></div>
+<div>${esc(s.customers ? s.customers.name : 'ลูกค้าทั่วไป')}</div>
+<div class="line"><span>ยอดสุทธิ ${baht(s.total)}</span><span>${status}</span></div>${acts}</div>`;
+  }).join('') || '<div class="card">ยังไม่มีบิล</div>';
+}
+async function pay(id, out) {
+  const a = parseFloat(prompt('รับชำระกี่บาท? (ค้างอยู่ ' + out + ')', out));
+  if (!(a > 0)) return;
+  const m = prompt('พิมพ์ 1 = เงินสด, 2 = โอนเงิน', '1') === '2' ? 'transfer' : 'cash';
+  const {error} = await sb.rpc('record_payment', {p_sale: id, p_amount: a, p_method: m});
+  if (error) return toast(error.message, 1);
+  await loadAll(); render(); toast('บันทึกรับชำระแล้ว');
+}
+async function voidSale(id, no) {
+  const reason = (prompt('ยกเลิกบิล ' + no + '\nกรุณาระบุเหตุผล') || '').trim(); if (!reason) return;
+  if (!confirm('ยืนยันยกเลิกบิล ' + no + ' ? ระบบจะคืนสต็อกและคืนยอดเงิน')) return;
+  const {error} = await sb.rpc('void_sale', {p_sale: id, p_reason: reason});
+  if (error) return toast(error.message, 1);
+  await loadAll(); render(); toast('ยกเลิกบิลแล้ว');
+}
+
+// ---------- ลูกค้า ----------
+function viewCust() {
+  return `<div class="card"><button class="btn" onclick="addCustomer()">＋ เพิ่มลูกค้าใหม่</button></div>` +
+    (S.cust.map(c => `<div class="card"><div class="line"><b>${esc(c.name)}</b><span>${esc(c.phone || '')}</span></div>
+<div class="line"><span>ซื้อสะสม ${baht(c.total_purchases)}</span><b class="${c.outstanding > 0 ? 'low' : ''}">ค้างชำระ ${baht(c.outstanding)}</b></div></div>`).join('') || '<div class="card">ยังไม่มีลูกค้า</div>');
+}
+
+// ---------- แสดงผล ----------
+const TABS = [['sell', '🧾 ขาย'], ['stock', '📦 สต็อก'], ['bills', '📑 บิล'], ['cust', '👥 ลูกค้า']];
+function render() {
+  if (!S.user) { $('#app').innerHTML = loginView(); return; }
+  const v = {sell: viewSell, stock: viewStock, bills: viewBills, cust: viewCust}[S.tab]();
+  $('#app').innerHTML = `<header><b>💧 Nature ขายส่ง</b><span><small style="color:#9bb7e0">${S.profile ? (S.profile.role === 'owner' ? 'เจ้าของ' : 'พนักงาน') : ''}</small><button onclick="logout()">ออก</button></span></header>
+<main>${v}</main><nav>${TABS.map(t => `<button class="${S.tab === t[0] ? 'on' : ''}" onclick="S.tab='${t[0]}';render()">${t[1]}</button>`).join('')}</nav>`;
+  if (S.tab === 'sell') sum();
+}
+start();
+</script>
+</body>
+</html>
